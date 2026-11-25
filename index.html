@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ec4899">
+<title>Unser Zuhause</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: -apple-system, Arial, sans-serif;
+  background: #fff0f6;
+  color: #831843;
+}
+header {
+  background: linear-gradient(135deg, #ec4899, #f9a8d4);
+  color: white;
+  padding: 35px 20px;
+  text-align: center;
+  border-radius: 0 0 30px 30px;
+}
+main {
+  max-width: 600px;
+  margin: auto;
+  padding: 20px;
+}
+.card {
+  background: white;
+  padding: 20px;
+  margin-bottom: 15px;
+  border-radius: 20px;
+  box-shadow: 0 4px 15px #ec489915;
+}
+input, button {
+  font: inherit;
+}
+input:not([type="checkbox"]), button {
+  width: 100%;
+  padding: 14px;
+  margin: 6px 0;
+  border-radius: 12px;
+  border: 1px solid #f9a8d4;
+}
+button {
+  background: #ec4899;
+  color: white;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+}
+.task {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid #fce7f3;
+}
+.task input {
+  width: 23px;
+  height: 23px;
+  accent-color: #ec4899;
+}
+.done {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+small {
+  color: #be185d;
+}
+progress {
+  width: 100%;
+  accent-color: #ec4899;
+}
+[hidden] {
+  display: none !important;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>🏡 Unser Zuhause</h1>
+  <p>Gemeinsam schaffen wir alles. ♡</p>
+</header>
+
+<main>
+
+<section id="login" class="card">
+  <h2>💕 Willkommen</h2>
+  <form id="loginForm">
+    <input id="email" type="email"
+      placeholder="E-Mail-Adresse"
+      required>
+    <input id="password" type="password"
+      placeholder="Passwort"
+      required>
+    <button type="submit">Anmelden</button>
+  </form>
+</section>
+
+<p id="message" role="status"></p>
+
+<section id="app" hidden>
+  <div class="card">
+    <h2>Unser Fortschritt</h2>
+    <p id="progressText"></p>
+    <progress id="progress" max="100" value="0"></progress>
+  </div>
+
+  <div class="card">
+    <h2>☀️ Tägliche Aufgaben</h2>
+    <div id="daily"></div>
+  </div>
+
+  <div class="card">
+    <h2>🗓️ Wochenplan</h2>
+    <div id="weekly"></div>
+  </div>
+
+  <div class="card">
+    <h2>✨ Monatliche Aufgaben</h2>
+    <div id="monthly"></div>
+  </div>
+
+  <button id="refresh">Aktualisieren</button>
+  <button id="logout">Abmelden</button>
+</section>
+
+</main>
+
+<script>
+const db = supabase.createClient(
+  'https://xrumuxdnxokuhhsstoxe.supabase.co',
+  'sb_publishable_NcIkuI-orxuiY5AgmGHFXg_ePExMYph'
+);
+
+const el = id => document.getElementById(id);
+
+const days = [
+  '', 'Montag', 'Dienstag',
+  'Mittwoch', 'Donnerstag',
+  'Freitag', 'Samstag', 'Sonntag'
+];
+
+el('loginForm').onsubmit = async event => {
+  event.preventDefault();
+  el('message').textContent = '';
+
+  const { error } =
+    await db.auth.signInWithPassword({
+      email: el('email').value,
+      password: el('password').value
+    });
+
+  if (error) {
+    el('message').textContent =
+      'Anmeldung fehlgeschlagen: ' + error.message;
+    return;
+  }
+
+  el('password').value = '';
+  await start();
+};
+
+async function start() {
+  const { data } = await db.auth.getSession();
+
+  el('login').hidden = !!data.session;
+  el('app').hidden = !data.session;
+
+  if (data.session) {
+    await loadTasks();
+  }
+}
+
+async function loadTasks() {
+  const { data, error } = await db
+    .from('current_tasks')
+    .select('*')
+    .order('weekday', { ascending: true });
+
+  if (error) {
+    el('message').textContent = error.message;
+    return;
+  }
+
+  el('message').textContent = '';
+
+  for (const group of ['daily','weekly','monthly']) {
+    el(group).replaceChildren();
+  }
+
+  const tasks = data || [];
+
+  for (const task of tasks) {
+    const target = el(task.frequency);
+    if (!target) continue;
+
+    const row = document.createElement('label');
+    row.className = 'task';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = !!task.currently_completed;
+
+    const info = document.createElement('div');
+    const title = document.createElement('div');
+    title.textContent = task.title;
+
+    if (checkbox.checked) {
+      title.className = 'done';
+    }
+
+    const details = document.createElement('small');
+    details.textContent =
+      task.category +
+      (task.weekday ? ' · ' + days[task.weekday] : '');
+
+    info.append(title, details);
+    row.append(checkbox, info);
+    target.append(row);
+
+    checkbox.onchange = async () => {
+      checkbox.disabled = true;
+
+      const { error } = await db
+        .from('tasks')
+        .update({
+          completed: checkbox.checked,
+          completed_at: checkbox.checked
+            ? new Date().toISOString()
+            : null
+        })
+        .eq('id', task.id);
+
+      if (error) {
+        el('message').textContent = error.message;
+        checkbox.checked = !checkbox.checked;
+        checkbox.disabled = false;
+      } else {
+        await loadTasks();
+      }
+    };
+  }
+
+  const done = tasks.filter(
+    task => task.currently_completed
+  ).length;
+
+  el('progressText').textContent =
+    done + ' von ' + tasks.length + ' Aufgaben erledigt';
+
+  el('progress').value =
+    tasks.length ? done / tasks.length * 100 : 0;
+}
+
+el('refresh').onclick = loadTasks;
+
+el('logout').onclick = async () => {
+  await db.auth.signOut();
+  await start();
+};
+
+start();
+</script>
+
+</body>
+</html>
